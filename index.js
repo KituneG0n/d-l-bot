@@ -1,113 +1,93 @@
+// Response for Uptime Robot
+const http = require("http");
+http
+  .createServer(function (request, response) {
+    response.writeHead(200, { "Content-Type": "text/plain" });
+    response.end("DiscordBot is active Please don't close this page \n");
+  })
+  .listen(3000);
 
-// const { clientId, guildId, token, publicKey } = require('./config.json');
-require('dotenv').config()
-const APPLICATION_ID = process.env.APPLICATION_ID 
-const TOKEN = process.env.TOKEN 
-const PUBLIC_KEY = process.env.PUBLIC_KEY || 'not set'
-const GUILD_ID = process.env.GUILD_ID 
+// Discord bot implements
+const Discord = require("discord.js");
+const client = new Discord.Client();
 
-
-const axios = require('axios')
-const express = require('express');
-const { InteractionType, InteractionResponseType, verifyKeyMiddleware } = require('discord-interactions');
-
-
-const app = express();
-// app.use(bodyParser.json());
-
-const discord_api = axios.create({
-  baseURL: 'https://discord.com/api/',
-  timeout: 3000,
-  headers: {
-	"Access-Control-Allow-Origin": "*",
-	"Access-Control-Allow-Methods": "GET, POST, PUT, DELETE",
-	"Access-Control-Allow-Headers": "Authorization",
-	"Authorization": `Bot ${TOKEN}`
-  }
+client.once("ready", () => {
+  // botのステータス表示
+  client.user.setActivity("LINE");
+  console.log("bot is ready!");
 });
 
+client.on("message", (message) => {
+  // bot(自分)のメッセージには反応しない(これをしないと兵庫県警に捕まる)
+  if (message.author.bot) {
+    return;
+  }
+  // DMには応答しない
+  if (message.channel.type == "dm") {
+    return;
+  }
 
+  const msg = message;
 
-
-app.post('/interactions', verifyKeyMiddleware(PUBLIC_KEY), async (req, res) => {
-  const interaction = req.body;
-
-  if (interaction.type === InteractionType.APPLICATION_COMMAND) {
-    console.log(interaction.data.name)
-    if(interaction.data.name == 'yo'){
-      return res.send({
-        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-        data: {
-          content: `Yo ${interaction.member.user.username}!`,
-        },
-      });
+  // botへのリプライは無視
+  if (msg.mentions.has(client.user)) {
+    return;
+  } else {
+    // GASにメッセージを送信
+    if (msg.channel.id == process.env.CHANNEL_ID) {
+      sendGAS(msg);
     }
 
-    if(interaction.data.name == 'dm'){
-      // https://discord.com/developers/docs/resources/user#create-dm
-      let c = (await discord_api.post(`/users/@me/channels`,{
-        recipient_id: interaction.member.user.id
-      })).data
-      try{
-        // https://discord.com/developers/docs/resources/channel#create-message
-        let res = await discord_api.post(`/channels/${c.id}/messages`,{
-          content:'Yo! I got your slash command. I am not able to respond to DMs just slash commands.',
-        })
-        console.log(res.data)
-      }catch(e){
-        console.log(e)
+    return;
+  }
+
+  function sendGAS(data) {
+    // LINE Messaging API風の形式に仕立てる(GASでの場合分けが楽になるように)
+    const jsonData = {
+      events: [
+        {
+          type: "discord",
+          name: data.author.username,
+          message: data.content,
+        },
+      ],
+    };
+    // GAS URLに送る
+    post(process.env.GAS_URL, jsonData);
+  }
+
+  function post(url, data) {
+    // requestモジュールを使う
+    const request = require("request");
+    const options = {
+      uri: url,
+      headers: { "Content-type": "application/json" },
+      json: data,
+      followAllRedirects: true,
+    };
+    // postする
+    request.post(options, function (error, response, body) {
+      if (error != null) {
+        msg.reply("更新に失敗しました");
+        return;
       }
 
-      return res.send({
-        // https://discord.com/developers/docs/interactions/receiving-and-responding#responding-to-an-interaction
-        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-        data:{
-          content:'👍'
+      const userid = response.body.userid;
+      const channelid = response.body.channelid;
+      const text = response.body.message;
+      if (userid != undefined && channelid != undefined && text != undefined) {
+        const channel = client.channels.get(channelid);
+        if (channel != null) {
+          channel.send(text);
         }
-      });
-    }
+      }
+    });
   }
-
 });
 
+if (process.env.DISCORD_BOT_TOKEN == undefined) {
+  console.log("please set ENV: DISCORD_BOT_TOKEN");
+  process.exit(0);
+}
 
-
-app.get('/register_commands', async (req,res) =>{
-  let slash_commands = [
-    {
-      "name": "yo",
-      "description": "replies with Yo!",
-      "options": []
-    },
-    {
-      "name": "dm",
-      "description": "sends user a DM",
-      "options": []
-    }
-  ]
-  try
-  {
-    // api docs - https://discord.com/developers/docs/interactions/application-commands#create-global-application-command
-    let discord_response = await discord_api.put(
-      `/applications/${APPLICATION_ID}/guilds/${GUILD_ID}/commands`,
-      slash_commands
-    )
-    console.log(discord_response.data)
-    return res.send('commands have been registered')
-  }catch(e){
-    console.error(e.code)
-    console.error(e.response?.data)
-    return res.send(`${e.code} error from discord`)
-  }
-})
-
-
-app.get('/', async (req,res) =>{
-  return res.send('Follow documentation ')
-})
-
-
-app.listen(8999, () => {
-
-})
-
+client.login(process.env.DISCORD_BOT_TOKEN);
